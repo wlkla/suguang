@@ -1,4 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
+import { memoryApi, chatApi } from '../utils/api'
+import { aiService } from '../services/aiService'
 
 interface Message {
   id: string
@@ -8,11 +10,12 @@ interface Message {
 }
 
 interface PastMemory {
-  id: string
+  id: number
   title: string
   date: string
   preview: string
   tags?: string[]
+  content?: string // Full content for AI context
 }
 
 interface SavedConversation {
@@ -27,59 +30,178 @@ interface SavedConversation {
   date: string
 }
 
+interface ChatHistory {
+  id: number
+  memoryRecord: {
+    id: number
+    title: string
+    createdAt: string
+  }
+  lastMessage: any
+  messageCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+interface ConversationDetail {
+  id: number
+  memoryRecord: {
+    id: number
+    title: string
+    date: string
+    content: string
+  }
+  messages: Array<{
+    id: string
+    text: string
+    sender: 'user' | 'past-self'
+    timestamp: string
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
 const ChatWithPast = () => {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputText, setInputText] = useState('')
   const [selectedMemory, setSelectedMemory] = useState<PastMemory | null>(null)
   const [isTyping, setIsTyping] = useState(false)
   const [pastMemories, setPastMemories] = useState<PastMemory[]>([])
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null)
+  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
+  const [showHistoryDialog, setShowHistoryDialog] = useState<number | null>(null)
+  const [conversationDetail, setConversationDetail] = useState<ConversationDetail | null>(null)
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  // Load saved conversations from localStorage
-  const loadMemories = () => {
-    const savedConversations: SavedConversation[] = JSON.parse(localStorage.getItem('savedConversations') || '[]')
-    
-    // Convert saved conversations to PastMemory format
-    const convertedMemories: PastMemory[] = savedConversations.map(conv => ({
-      id: conv.id,
-      title: conv.name,
-      date: conv.date,
-      preview: conv.messages.length > 0 ? conv.messages[0].content.substring(0, 50) + '...' : '无内容',
-      tags: conv.tags
-    }))
+  // Load memories from API
+  const loadMemories = async () => {
+    try {
+      const response = await memoryApi.getList()
+      
+      // Convert memory records to PastMemory format
+      const convertedMemories: PastMemory[] = response.records.map((record: any) => ({
+        id: record.id,
+        title: record.title || '未命名记忆',
+        date: new Date(record.createdAt).toLocaleDateString(),
+        preview: record.content.length > 50 ? record.content.substring(0, 50) + '...' : record.content,
+        tags: record.tags ? record.tags.split(',') : [],
+        content: record.content // Store full content for AI context
+      }))
 
-    setPastMemories(convertedMemories)
+      setPastMemories(convertedMemories)
+    } catch (error) {
+      console.error('Failed to load memories:', error)
+      setPastMemories([])
+    }
+  }
+
+  // Load chat histories from API
+  const loadChatHistories = async () => {
+    try {
+      const response = await chatApi.getList()
+      setChatHistories(response.conversations || [])
+    } catch (error) {
+      console.error('Failed to load chat histories:', error)
+      setChatHistories([])
+    }
   }
 
   useEffect(() => {
     loadMemories()
+    loadChatHistories()
   }, [])
 
-  const deleteMemory = (memoryId: string) => {
-    // Remove from localStorage if it's a saved conversation
-    const savedConversations: SavedConversation[] = JSON.parse(localStorage.getItem('savedConversations') || '[]')
-    const updatedConversations = savedConversations.filter(conv => conv.id !== memoryId)
-    localStorage.setItem('savedConversations', JSON.stringify(updatedConversations))
-    
-    // Update local state
-    setPastMemories(prev => prev.filter(memory => memory.id !== memoryId))
-    
-    // Close any open conversation if it was the deleted one
-    if (selectedMemory?.id === memoryId) {
-      setSelectedMemory(null)
-      setMessages([])
+  const deleteMemory = async (memoryId: number) => {
+    try {
+      await memoryApi.delete(memoryId)
+      
+      // Update local state
+      setPastMemories(prev => prev.filter(memory => memory.id !== memoryId))
+      
+      // Close any open conversation if it was the deleted one
+      if (selectedMemory?.id === memoryId) {
+        setSelectedMemory(null)
+        setMessages([])
+      }
+      
+      setShowDeleteConfirm(null)
+    } catch (error) {
+      console.error('Failed to delete memory:', error)
+      // You might want to show an error message to the user
     }
-    
-    setShowDeleteConfirm(null)
   }
 
-  const confirmDelete = (memoryId: string) => {
+  const confirmDelete = (memoryId: number) => {
     setShowDeleteConfirm(memoryId)
   }
 
   const cancelDelete = () => {
     setShowDeleteConfirm(null)
+  }
+
+  // View conversation history for a memory (original counselor conversation)
+  const viewConversationHistory = async (memoryId: number) => {
+    setShowHistoryDialog(memoryId)
+    setIsLoadingHistory(true)
+    setConversationDetail(null)
+
+    try {
+      const memory = pastMemories.find(m => m.id === memoryId)
+      if (!memory) return
+
+      // Look for the original counselor conversation in localStorage
+      // Search all localStorage keys for conversation history matching this memory title
+      let foundConversation = null
+      
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith('conversation_')) {
+          try {
+            const conversationData = JSON.parse(localStorage.getItem(key) || '{}')
+            if (conversationData.title === memory.title) {
+              foundConversation = conversationData
+              break
+            }
+          } catch (e) {
+            // Skip invalid JSON
+          }
+        }
+      }
+
+      if (foundConversation) {
+        // Convert the counselor conversation to the expected format
+        const counselorMessages = foundConversation.messages.map((msg: any, index: number) => ({
+          id: index.toString(),
+          text: msg.content,
+          sender: msg.role === 'user' ? 'user' : 'counselor', // Use 'counselor' instead of 'past-self'
+          timestamp: msg.timestamp || new Date().toISOString()
+        }))
+
+        setConversationDetail({
+          id: memoryId,
+          memoryRecord: {
+            id: memoryId,
+            title: memory.title,
+            date: memory.date,
+            content: memory.content || memory.preview || ''
+          },
+          messages: counselorMessages,
+          createdAt: foundConversation.savedAt || new Date().toISOString(),
+          updatedAt: foundConversation.savedAt || new Date().toISOString()
+        })
+      }
+      // If no history found, conversationDetail remains null and will show "no history" message
+    } catch (error) {
+      console.error('Failed to load conversation history:', error)
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  const closeHistoryDialog = () => {
+    setShowHistoryDialog(null)
+    setConversationDetail(null)
   }
 
   const scrollToBottom = () => {
@@ -90,19 +212,7 @@ const ChatWithPast = () => {
     scrollToBottom()
   }, [messages])
 
-  const simulatePastSelfResponse = (_userMessage: string): string => {
-    // 模拟过去自己的回复逻辑
-    const responses = [
-      "那时候的我确实是这么想的，但现在回想起来...",
-      "这个想法我记得很清楚，当时我觉得...",
-      "有趣，你现在怎么看待这个问题呢？",
-      "我记得那段时间我特别关注这件事...",
-      "现在的你和那时的我有什么不同的看法吗？"
-    ]
-    return responses[Math.floor(Math.random() * responses.length)]
-  }
-
-  const handleSendMessage = () => {
+  const handleSendMessage = async () => {
     if (!inputText.trim() || !selectedMemory) return
 
     const newMessage: Message = {
@@ -113,20 +223,39 @@ const ChatWithPast = () => {
     }
 
     setMessages(prev => [...prev, newMessage])
+    const currentInput = inputText
     setInputText('')
     setIsTyping(true)
 
-    // 模拟过去自己的回复
-    setTimeout(() => {
+    try {
+      // Use AI service to simulate past self
+      const pastSelfResponse = await aiService.chatWithPastSelf(
+        currentInput,
+        selectedMemory.content || selectedMemory.preview,
+        messages
+      )
+
       const pastSelfMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: simulatePastSelfResponse(inputText),
+        text: pastSelfResponse,
         sender: 'past-self',
         timestamp: new Date()
       }
+
       setMessages(prev => [...prev, pastSelfMessage])
+    } catch (error) {
+      console.error('Failed to get past self response:', error)
+      // Fallback message
+      const fallbackMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: "很抱歉，我现在想不起来当时的想法了...不过那时候的我一定很想和现在的你聊聊。",
+        sender: 'past-self',
+        timestamp: new Date()
+      }
+      setMessages(prev => [...prev, fallbackMessage])
+    } finally {
       setIsTyping(false)
-    }, 1000 + Math.random() * 2000)
+    }
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -139,39 +268,21 @@ const ChatWithPast = () => {
   const startConversation = (memory: PastMemory) => {
     setSelectedMemory(memory)
     
-    // Check if this is a saved conversation
-    const savedConversations: SavedConversation[] = JSON.parse(localStorage.getItem('savedConversations') || '[]')
-    const savedConversation = savedConversations.find(conv => conv.id === memory.id)
+    // Format tags for display
+    const tagsText = memory.tags && memory.tags.length > 0 
+      ? memory.tags.join('、') 
+      : '复杂的'
     
-    if (savedConversation) {
-      // Load the saved conversation
-      const convertedMessages: Message[] = savedConversation.messages.map((msg, index) => ({
-        id: index.toString(),
-        text: msg.content,
-        sender: msg.role === 'user' ? 'user' : 'past-self',
-        timestamp: new Date(msg.timestamp)
-      }))
-      
-      setMessages([
-        ...convertedMessages,
-        {
-          id: (convertedMessages.length).toString(),
-          text: `这是我们之前的对话记录。现在的你想聊什么？`,
-          sender: 'past-self',
-          timestamp: new Date()
-        }
-      ])
-    } else {
-      // Default conversation start
-      setMessages([
-        {
-          id: '0',
-          text: `你好！我是${memory.date}的你。当时我记录了"${memory.title}"，想和现在的你聊聊这个话题。`,
-          sender: 'past-self',
-          timestamp: new Date()
-        }
-      ])
-    }
+    // Start with time travel greeting
+    const initialMessages = [
+      {
+        id: '0',
+        text: `嘿，这么多年过去了，你现在是什么样子了？我还是当时的我。那时候我记录了"${memory.title}"，我记得当时的心情是${tagsText}。`,
+        sender: 'past-self',
+        timestamp: new Date()
+      }
+    ]
+    setMessages(initialMessages)
   }
 
   return (
@@ -183,7 +294,7 @@ const ChatWithPast = () => {
               与过去的自己对话
             </h1>
             <p className="text-gray-600">
-              选择一段记忆，开启跨越时空的心灵对话
+              选择一段记忆，让AI模拟当时的你，体验真实的时空对话
             </p>
           </div>
       
@@ -241,19 +352,37 @@ const ChatWithPast = () => {
                         </div>
                       )}
                       
-                      {/* Delete button */}
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          confirmDelete(memory.id)
-                        }}
-                        className="absolute top-3 right-3 p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-50 rounded-lg"
-                        title="删除记忆"
-                      >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                        </svg>
-                      </button>
+                      {/* Action buttons */}
+                      <div className="absolute top-3 right-3 flex space-x-1">
+                        {/* View history button - show for all memories for now */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            viewConversationHistory(memory.id)
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-blue-500 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-blue-50 rounded-lg"
+                          title="查看心理引导记录"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                          </svg>
+                        </button>
+                        
+                        {/* Delete button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            confirmDelete(memory.id)
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-50 rounded-lg"
+                          title="删除记忆"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   ))
                 )}
@@ -299,8 +428,8 @@ const ChatWithPast = () => {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
                     </div>
-                    <h3 className="text-lg font-semibold text-gray-700 mb-2">开始一段对话</h3>
-                    <p className="text-gray-500">选择左侧的一段记忆，与过去的自己进行深度对话</p>
+                    <h3 className="text-lg font-semibold text-gray-700 mb-2">开始时空对话</h3>
+                    <p className="text-gray-500">选择左侧的一段记忆，AI将模拟当时的你与现在对话</p>
                   </div>
                 )}
 
@@ -376,7 +505,7 @@ const ChatWithPast = () => {
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyPress={handleKeyPress}
                     disabled={!selectedMemory}
-                    placeholder={selectedMemory ? "输入你想说的话..." : "请先选择一段记忆"}
+                    placeholder={selectedMemory ? "对过去的自己说些什么..." : "请先选择一段记忆"}
                     className="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed transition-colors"
                   />
                   <button
@@ -425,6 +554,134 @@ const ChatWithPast = () => {
                 >
                   确认删除
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Conversation History Dialog */}
+        {showHistoryDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl w-full max-w-4xl max-h-[90vh] mx-4 shadow-2xl border border-gray-100 flex flex-col">
+              {/* Dialog Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-xl flex items-center justify-center mr-4">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">心理引导记录</h3>
+                    <p className="text-sm text-gray-500">
+                      {conversationDetail ? `与心理引导师的原始对话记录` : '加载中...'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={closeHistoryDialog}
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Dialog Content */}
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {isLoadingHistory ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-gray-500">加载对话历史中...</p>
+                    </div>
+                  </div>
+                ) : conversationDetail ? (
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <div className="space-y-4">
+                      {conversationDetail.messages.map((message, index) => (
+                        <div
+                          key={index}
+                          className={`flex ${message.sender === 'user' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`flex items-end space-x-2 ${message.sender === 'user' ? 'flex-row-reverse space-x-reverse' : ''}`}>
+                            {/* Avatar */}
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
+                              message.sender === 'user' 
+                                ? 'bg-gradient-to-r from-blue-500 to-indigo-500' 
+                                : message.sender === 'counselor'
+                                ? 'bg-gradient-to-r from-purple-500 to-violet-500'
+                                : 'bg-gradient-to-r from-gray-400 to-gray-500'
+                            }`}>
+                              <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                {message.sender === 'counselor' ? (
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                                ) : (
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                )}
+                              </svg>
+                            </div>
+                            
+                            {/* Message bubble */}
+                            <div
+                              className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
+                                message.sender === 'user'
+                                  ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-br-md'
+                                  : message.sender === 'counselor'
+                                  ? 'bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 text-gray-900 rounded-bl-md'
+                                  : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md'
+                              }`}
+                            >
+                              {message.sender === 'counselor' && (
+                                <p className="text-xs mb-1 text-purple-600 font-medium">
+                                  AI心理引导师
+                                </p>
+                              )}
+                              {message.sender === 'past-self' && (
+                                <p className="text-xs mb-1 text-blue-600">
+                                  {conversationDetail?.memoryRecord.date} 的你
+                                </p>
+                              )}
+                              <p className="leading-relaxed">{message.text}</p>
+                              <p className={`text-xs mt-2 ${
+                                message.sender === 'user' ? 'text-blue-200' : 
+                                message.sender === 'counselor' ? 'text-purple-400' : 'text-gray-400'
+                              }`}>
+                                {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                        </svg>
+                      </div>
+                      <h4 className="text-lg font-semibold text-gray-700 mb-2">暂无心理引导记录</h4>
+                      <p className="text-gray-500">这段记忆没有保存与心理引导师的对话记录</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Dialog Footer */}
+              <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+                <div className="flex justify-end">
+                  <button
+                    onClick={closeHistoryDialog}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                  >
+                    关闭
+                  </button>
+                </div>
               </div>
             </div>
           </div>

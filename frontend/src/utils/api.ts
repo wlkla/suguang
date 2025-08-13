@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { LoginRequest, RegisterRequest, AuthResponse } from '../types/auth'
 
-const API_BASE_URL = 'http://localhost:3001/api'
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api'
 
 // 创建axios实例
 export const api = axios.create({
@@ -83,6 +83,12 @@ export const memoryApi = {
   // 搜索记忆记录
   search: async (query: string) => {
     const response = await api.get('/memory/search', { params: { q: query } })
+    return response.data
+  },
+
+  // 删除记忆记录
+  delete: async (id: number) => {
+    const response = await api.delete(`/memory/${id}`)
     return response.data
   },
 }

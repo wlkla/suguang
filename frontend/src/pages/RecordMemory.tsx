@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { aiService, type AIMessage } from '../services/aiService'
+import { memoryApi } from '../utils/api'
 
 interface Message {
   role: 'user' | 'ai'
@@ -45,7 +46,7 @@ const RecordMemory = () => {
       // Fallback message
       const fallbackMessage: Message = {
         role: 'ai',
-        content: '你好！我是你的AI思想伙伴。今天想聊什么呢？可以是任何让你思考的事情。',
+        content: '你好，很高兴见到你。你想从哪里开始说起今天的心情呢？',
         timestamp: new Date()
       }
       setMessages([fallbackMessage])
@@ -90,7 +91,7 @@ const RecordMemory = () => {
       // Add error message
       const errorMessage: Message = {
         role: 'ai',
-        content: '抱歉，我现在遇到了一些技术问题。请继续分享你的想法，我会尽快回应你的。',
+        content: '很抱歉，我现在遇到了一些技术问题。不过没关系，我在认真听，你可以继续和我分享你的想法。',
         timestamp: new Date()
       }
       setMessages(prev => [...prev, errorMessage])
@@ -115,34 +116,52 @@ const RecordMemory = () => {
     setShowSaveDialog(true)
   }
 
-  const handleSaveConfirm = () => {
+  const handleSaveConfirm = async () => {
     if (!conversationName.trim()) {
       alert('请输入对话名称')
       return
     }
 
-    const savedConversation: SavedConversation = {
-      id: Date.now().toString(),
-      name: conversationName,
-      tags: selectedTags,
-      messages: messages,
-      date: new Date().toISOString().split('T')[0]
+    try {
+      // Convert messages to content format for display
+      const content = messages.map(msg => `${msg.role === 'user' ? '我' : 'AI心理引导师'}: ${msg.content}`).join('\n\n')
+      
+      // Also save the structured conversation data for history viewing
+      const conversationData = {
+        messages: messages,
+        savedAt: new Date().toISOString()
+      }
+      
+      await memoryApi.create({
+        title: conversationName,
+        content,
+        tags: selectedTags.join(','),
+        // Store conversation data as a stringified JSON in a custom field if backend supports it
+        // For now, we'll store it separately in localStorage
+      })
+      
+      // Store structured conversation data for history viewing
+      // Use a hash of the title and content to create a unique but deterministic key
+      const memoryKey = `conversation_${conversationName.replace(/\s+/g, '_')}_${Date.now()}`
+      localStorage.setItem(memoryKey, JSON.stringify({
+        title: conversationName,
+        tags: selectedTags,
+        ...conversationData
+      }))
+
+      console.log('Memory saved successfully')
+      
+      // Reset state
+      setShowSaveDialog(false)
+      setConversationName('')
+      setSelectedTags([])
+      setCustomTag('')
+      setIsConversationMode(false)
+      setMessages([])
+    } catch (error) {
+      console.error('Failed to save memory:', error)
+      alert('保存失败，请重试')
     }
-
-    // Save to localStorage (TODO: Replace with API call)
-    const existingConversations = JSON.parse(localStorage.getItem('savedConversations') || '[]')
-    existingConversations.push(savedConversation)
-    localStorage.setItem('savedConversations', JSON.stringify(existingConversations))
-
-    console.log('Conversation saved:', savedConversation)
-    
-    // Reset state
-    setShowSaveDialog(false)
-    setConversationName('')
-    setSelectedTags([])
-    setCustomTag('')
-    setIsConversationMode(false)
-    setMessages([])
   }
 
   const handleCancelSave = () => {
@@ -183,7 +202,7 @@ const RecordMemory = () => {
         <div className="absolute bottom-20 left-1/4 w-12 h-12 bg-indigo-200 rounded-full opacity-25"></div>
         <div className="absolute bottom-32 right-10 w-24 h-24 bg-pink-200 rounded-full opacity-20"></div>
 
-        <div className="relative z-10 max-w-6xl mx-auto h-screen flex flex-col pt-20 px-4">
+        <div className="relative z-10 max-w-6xl mx-auto h-screen flex flex-col pt-20 px-4 pb-8">
           {/* Header with buttons */}
           <div className="flex justify-between items-center mb-6">
             <div className="flex items-center">
@@ -193,8 +212,8 @@ const RecordMemory = () => {
                 </svg>
               </div>
               <div>
-                <h2 className="text-xl font-bold text-gray-800">AI 思想对话</h2>
-                <p className="text-sm text-gray-600">探索内心世界的深度对话</p>
+                <h2 className="text-xl font-bold text-gray-800">AI 心理引导</h2>
+                <p className="text-sm text-gray-600">在安全的氛围中，表达真实的自己</p>
               </div>
             </div>
             
@@ -305,7 +324,7 @@ const RecordMemory = () => {
                   value={userInput}
                   onChange={(e) => setUserInput(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  placeholder={isLoading ? "AI 正在思考中..." : "分享你此刻的想法..."}
+                  placeholder={isLoading ? "正在倾听中..." : "请告诉我你现在的感受..."}
                   disabled={isLoading}
                   className="flex-1 px-4 py-3 border-2 border-purple-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none bg-white/80 backdrop-blur-sm transition-all duration-200 disabled:bg-gray-100 disabled:text-gray-500"
                   rows={2}
@@ -476,7 +495,7 @@ const RecordMemory = () => {
             
             {/* Subtitle */}
             <p className="text-xl text-gray-600 mb-8 max-w-2xl mx-auto leading-relaxed">
-              让AI成为你的思想伙伴，通过深度对话探索内心世界，记录此刻珍贵的想法与感悟
+              让AI心理引导师陪伴你，在温暖安全的环境中，真实地表达内心的感受与想法
             </p>
             
             {/* Features */}
@@ -487,8 +506,8 @@ const RecordMemory = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                 </div>
-                <h3 className="font-semibold text-gray-800 mb-2">智能引导</h3>
-                <p className="text-sm text-gray-600">AI会智能提问，帮你深入探索内心想法</p>
+                <h3 className="font-semibold text-gray-800 mb-2">温暖倾听</h3>
+                <p className="text-sm text-gray-600">心理引导师用温柔无评判的方式引导你表达</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg">
@@ -497,8 +516,8 @@ const RecordMemory = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z" />
                   </svg>
                 </div>
-                <h3 className="font-semibold text-gray-800 mb-2">情感记录</h3>
-                <p className="text-sm text-gray-600">捕捉当下的情绪状态和内心感受</p>
+                <h3 className="font-semibold text-gray-800 mb-2">情感安全</h3>
+                <p className="text-sm text-gray-600">提供安全的氛围让你愿意真实地表达感受</p>
               </div>
               
               <div className="bg-white/70 backdrop-blur-sm rounded-xl p-6 shadow-lg">
@@ -507,8 +526,8 @@ const RecordMemory = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.746 0 3.332.477 4.5 1.253v13C19.832 18.477 18.246 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" />
                   </svg>
                 </div>
-                <h3 className="font-semibold text-gray-800 mb-2">永久保存</h3>
-                <p className="text-sm text-gray-600">每一次对话都将成为珍贵的回忆</p>
+                <h3 className="font-semibold text-gray-800 mb-2">深度觉察</h3>
+                <p className="text-sm text-gray-600">帮助你更清晰地觉察内心的情绪与想法</p>
               </div>
             </div>
             
@@ -530,7 +549,7 @@ const RecordMemory = () => {
                       <svg className="w-6 h-6 mr-3 group-hover:animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
                       </svg>
-                      开始与AI对话
+                      开始心理引导
                     </>
                   )}
                 </span>

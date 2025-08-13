@@ -81,7 +81,7 @@ const Home = () => {
           </div>
         </div>
 
-        <div className="bg-white/90 backdrop-blur-sm p-12 rounded-3xl shadow-xl border border-violet-100 max-w-4xl mx-auto">
+        <div className="bg-white/90 backdrop-blur-sm p-12 rounded-3xl shadow-xl border border-violet-100 max-w-4xl mx-auto mb-16">
           <div className="text-center mb-8">
             <h2 className="text-3xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent mb-4">
               开始你的思想之旅
