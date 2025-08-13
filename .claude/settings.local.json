@@ -14,7 +14,9 @@
       "Bash(npm uninstall:*)",
       "Bash(npm ls:*)",
       "Bash(rm:*)",
-      "Bash(npx tailwindcss:*)"
+      "Bash(npx tailwindcss:*)",
+      "Bash(npm run build:*)",
+      "Bash(npm run lint)"
     ],
     "deny": [],
     "ask": []
