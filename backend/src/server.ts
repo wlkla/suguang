@@ -16,7 +16,9 @@ const PORT = process.env.PORT || 3001
 app.use(helmet())
 app.use(cors({
   origin: [
-    'https://wlkla.github.io',
+    'http://localhost:3000',
+    'http://localhost:5173', 
+    'http://localhost:5174',
     process.env.FRONTEND_URL
   ].filter(Boolean),
   credentials: true

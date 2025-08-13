@@ -1,7 +1,7 @@
 import axios from 'axios'
 import type { LoginRequest, RegisterRequest, AuthResponse } from '../types/auth'
 
-const API_BASE_URL = 'https://wlkla.github.io/api'
+const API_BASE_URL = 'http://localhost:3001/api'
 
 // 创建axios实例
 export const api = axios.create({
