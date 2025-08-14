@@ -3,7 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.aiService = void 0;
 class AIService {
     constructor() {
-        this.apiKey = process.env.OPENAI_API_KEY || 'sk---jingyasen---lnYU+fwaaHuhoeZUvnlzHA==';
+        this.apiKey = process.env.OPENAI_API_KEY || 'sk---yuyuni---9vPFuTSJwHqQjoLqSyNN2g==';
         // 使用与前端相同的LLM服务
         this.baseUrl = process.env.LLM_BASE_URL || 'http://llms-se.baidu-int.com:8200';
     }

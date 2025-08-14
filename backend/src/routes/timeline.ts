@@ -120,20 +120,56 @@ router.post('/generate', authenticateToken, async (req: AuthRequest, res: Respon
       actualStage = `conversation_${conversationAnalyses.length + 1}`
     }
 
-    // 使用传入的对话数据，或从数据库获取
-    let analysisConversationData = conversationData
-    if (!analysisConversationData && conversationId) {
-      const conversation = await prisma.conversation.findFirst({
-        where: {
-          id: conversationId,
-          userId,
-          memoryRecordId
-        }
-      })
-      
-      if (conversation) {
-        analysisConversationData = JSON.parse(conversation.conversationData)
+    // 获取该记忆的所有历史对话数据以提供完整的思想变化历程
+    const allConversations = await prisma.conversation.findMany({
+      where: {
+        memoryRecordId,
+        userId
+      },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        conversationData: true,
+        createdAt: true,
+        updatedAt: true
       }
+    })
+
+    // 构建完整的历史对话数据
+    let allHistoryMessages: any[] = []
+    let currentConversationData = conversationData
+    
+    // 添加所有历史对话
+    for (const conv of allConversations) {
+      const messages = JSON.parse(conv.conversationData)
+      // 为每条消息添加对话标识，以便区分不同对话
+      const messagesWithConvId = messages.map((msg: any) => ({
+        ...msg,
+        conversationId: conv.id,
+        conversationDate: conv.createdAt.toISOString()
+      }))
+      allHistoryMessages = [...allHistoryMessages, ...messagesWithConvId]
+    }
+
+    // 如果有当前对话数据且不在数据库中，添加到历史中
+    if (currentConversationData && currentConversationData.length > 0) {
+      // 检查是否已经在历史中（避免重复）
+      const hasCurrentConversation = conversationId && allConversations.some(conv => conv.id === conversationId)
+      if (!hasCurrentConversation) {
+        const currentMessages = currentConversationData.map((msg: any) => ({
+          ...msg,
+          conversationId: 'current',
+          conversationDate: new Date().toISOString()
+        }))
+        allHistoryMessages = [...allHistoryMessages, ...currentMessages]
+      }
+    }
+
+    // 准备分析数据：包含当前对话和完整历史
+    const analysisData = {
+      currentConversation: currentConversationData || [],
+      allHistoryConversations: allHistoryMessages,
+      conversationCount: allConversations.length + (currentConversationData && currentConversationData.length > 0 && !conversationId ? 1 : 0)
     }
 
     // 检查是否已存在相同阶段的分析，避免重复
@@ -156,10 +192,10 @@ router.post('/generate', authenticateToken, async (req: AuthRequest, res: Respon
       })
     }
 
-    // 使用AI生成心理分析
+    // 使用AI生成心理分析，包含完整的历史对话数据
     const analysis = await aiService.analyzePsychology(
       memoryRecord,
-      analysisConversationData,
+      analysisData,
       actualStage
     )
 

@@ -13,7 +13,7 @@ interface AIApiResponse {
 
 class AIService {
   private readonly baseUrl = "/api"
-  private readonly apiKey = "sk---jingyasen---lnYU+fwaaHuhoeZUvnlzHA=="
+  private readonly apiKey = "sk---yuyuni---9vPFuTSJwHqQjoLqSyNN2g=="
 
   async callAI(prompt: string, conversationHistory: AIMessage[] = []): Promise<string> {
     const url = `${this.baseUrl}/chat/completions`

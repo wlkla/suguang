@@ -303,24 +303,6 @@ const ChatWithPast = () => {
     setTimelineData(null)
   }
 
-  // Clean up duplicate timeline records
-  const cleanupTimelineRecords = async (memoryId: number) => {
-    try {
-      const result = await timelineApi.cleanup(memoryId)
-      console.log('Cleanup result:', result)
-      
-      // Refresh timeline data
-      if (showTimelineDialog) {
-        viewTimeline(memoryId)
-      }
-      
-      alert(`已清理 ${result.deleted} 条重复记录，保留 ${result.remaining} 条有效记录`)
-    } catch (error) {
-      console.error('Error cleaning up timeline:', error)
-      alert('清理失败，请重试')
-    }
-  }
-
   // Generate timeline analysis after conversation ends
   const generateTimelineAnalysis = async (memoryId: number, conversationMessages: Message[]) => {
     try {
@@ -336,32 +318,36 @@ const ChatWithPast = () => {
   }
 
   // End conversation and trigger analysis
-  const endConversation = async () => {
-    if (!selectedMemory || conversationAnalyzed) {
-      // If no memory selected or already analyzed, just close
-      setSelectedMemory(null)
-      setMessages([])
-      setConversationAnalyzed(false)
+  const endConversation = () => {
+    if (!selectedMemory) {
+      // If no memory selected, nothing to do
       return
     }
 
-    // Check if there are actual user messages (meaningful conversation)
-    const userMessages = messages.filter(msg => msg.sender === 'user')
-    if (userMessages.length > 0) {
-      // Trigger timeline analysis for this conversation
-      try {
-        await generateTimelineAnalysis(selectedMemory.id, messages)
-        console.log('Conversation analysis completed')
-      } catch (error) {
-        console.error('Failed to generate timeline analysis:', error)
-      }
-    }
+    // Store current conversation data before clearing UI
+    const currentMemory = selectedMemory
+    const currentMessages = [...messages]
+    const userMessages = currentMessages.filter(msg => msg.sender === 'user')
     
-    // Mark as analyzed and clear the conversation
-    setConversationAnalyzed(true)
+    // Immediately clear the conversation UI for better UX
     setSelectedMemory(null)
     setMessages([])
     setConversationAnalyzed(false)
+    
+    // Trigger background analysis only if there are meaningful user messages and not already analyzed
+    if (!conversationAnalyzed && userMessages.length > 0) {
+      // Run analysis in background without blocking UI
+      generateTimelineAnalysis(currentMemory.id, currentMessages)
+        .then(() => {
+          console.log('🎯 Background conversation analysis completed for:', currentMemory.title)
+          // 可选：显示一个不干扰的成功提示
+          // showToast(`"${currentMemory.title}"的对话分析已完成`, 'success')
+        })
+        .catch((error) => {
+          console.error('❌ Background timeline analysis failed:', error)
+          // 分析失败不影响用户体验，只在控制台记录
+        })
+    }
   }
 
   const scrollToBottom = () => {
@@ -890,15 +876,6 @@ const ChatWithPast = () => {
                   </div>
                 </div>
                 <div className="flex items-center space-x-2">
-                  {timelineData && timelineData.timeline && timelineData.timeline.length > 1 && (
-                    <button
-                      onClick={() => cleanupTimelineRecords(showTimelineDialog!)}
-                      className="px-3 py-2 text-sm text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-lg transition-colors border border-orange-200 hover:border-orange-300"
-                      title="清理重复记录"
-                    >
-                      清理重复
-                    </button>
-                  )}
                   <button
                     onClick={closeTimelineDialog}
                     className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
