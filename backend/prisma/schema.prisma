@@ -15,9 +15,10 @@ model User {
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
   
-  memoryRecords   MemoryRecord[]
-  conversations   Conversation[]
-  thoughtAnalysis ThoughtAnalysis[]
+  memoryRecords     MemoryRecord[]
+  conversations     Conversation[]
+  thoughtAnalysis   ThoughtAnalysis[]
+  timelineAnalysis  TimelineAnalysis[]
   
   @@map("users")
 }
@@ -32,8 +33,9 @@ model MemoryRecord {
   aiAnalysis String?  @map("ai_analysis") // AI对当前记录的分析
   createdAt  DateTime @default(now()) @map("created_at")
   
-  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  conversations Conversation[]
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations    Conversation[]
+  timelineAnalysis TimelineAnalysis[]
   
   @@map("memory_records")
 }
@@ -46,8 +48,9 @@ model Conversation {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
   
-  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  memoryRecord MemoryRecord @relation(fields: [memoryRecordId], references: [id], onDelete: Cascade)
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memoryRecord     MemoryRecord       @relation(fields: [memoryRecordId], references: [id], onDelete: Cascade)
+  timelineAnalysis TimelineAnalysis[]
   
   @@map("conversations")
 }
@@ -63,4 +66,22 @@ model ThoughtAnalysis {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   @@map("thought_analysis")
+}
+
+model TimelineAnalysis {
+  id               Int      @id @default(autoincrement())
+  userId           Int      @map("user_id")
+  memoryRecordId   Int      @map("memory_record_id")
+  conversationId   Int?     @map("conversation_id") // 可选，如果是基于特定对话的分析
+  analysisStage    String   @map("analysis_stage") // 'initial', 'conversation_1', 'conversation_2', etc.
+  psychologicalInsight String @map("psychological_insight") // AI心理分析结果
+  emotionalState   String?  @map("emotional_state") // 情绪状态分析
+  growthIndicators String?  @map("growth_indicators") // 成长指标
+  createdAt        DateTime @default(now()) @map("created_at")
+  
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  memoryRecord MemoryRecord @relation(fields: [memoryRecordId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  
+  @@map("timeline_analysis")
 }

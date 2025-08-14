@@ -6,6 +6,7 @@ import authRoutes from './routes/auth'
 import memoryRoutes from './routes/memory'
 import chatRoutes from './routes/chat'
 import analysisRoutes from './routes/analysis'
+import timelineRoutes from './routes/timeline'
 
 dotenv.config()
 
@@ -19,7 +20,7 @@ app.use(cors({
     'http://localhost:3000',
     'http://localhost:5173', 
     'http://localhost:5174',
-    process.env.FRONTEND_URL
+    process.env.FRONTEND_URL || ''
   ].filter(Boolean),
   credentials: true
 }))
@@ -36,6 +37,7 @@ app.use('/api/auth', authRoutes)
 app.use('/api/memory', memoryRoutes)
 app.use('/api/chat', chatRoutes)
 app.use('/api/analysis', analysisRoutes)
+app.use('/api/timeline', timelineRoutes)
 
 // 错误处理中间件
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

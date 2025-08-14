@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { memoryApi, chatApi } from '../utils/api'
+import { memoryApi, chatApi, timelineApi } from '../utils/api'
 import { aiService } from '../services/aiService'
 
 interface Message {
@@ -72,6 +72,10 @@ const ChatWithPast = () => {
   const [showHistoryDialog, setShowHistoryDialog] = useState<number | null>(null)
   const [conversationDetail, setConversationDetail] = useState<ConversationDetail | null>(null)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [showTimelineDialog, setShowTimelineDialog] = useState<number | null>(null)
+  const [timelineData, setTimelineData] = useState<any>(null)
+  const [isLoadingTimeline, setIsLoadingTimeline] = useState(false)
+  const [conversationAnalyzed, setConversationAnalyzed] = useState(false) // 追踪当前对话是否已分析
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // Load memories from API
@@ -110,6 +114,79 @@ const ChatWithPast = () => {
   useEffect(() => {
     loadMemories()
     loadChatHistories()
+  }, [])
+
+  // Handle page unload - trigger analysis if there's an active conversation
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (selectedMemory && messages.length > 0 && !conversationAnalyzed) {
+        // Use sendBeacon for reliable delivery on page unload
+        const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001/api'
+        const userMessages = messages.filter(msg => msg.sender === 'user')
+        
+        if (userMessages.length > 0) { // Only if there's actual user interaction
+          try {
+            // Use the same API format as the regular generate call
+            timelineApi.generate({
+              memoryRecordId: selectedMemory.id,
+              conversationData: messages
+            }).catch(() => {
+              // If the regular API call fails (e.g., network issues during page unload),
+              // fall back to sendBeacon
+              const data = JSON.stringify({
+                memoryRecordId: selectedMemory.id,
+                conversationData: messages
+              })
+              
+              const blob = new Blob([data], { type: 'application/json' })
+              navigator.sendBeacon(`${API_BASE_URL}/timeline/generate`, blob)
+            })
+          } catch (error) {
+            // Final fallback to sendBeacon if everything else fails
+            const data = JSON.stringify({
+              memoryRecordId: selectedMemory.id,
+              conversationData: messages
+            })
+            
+            const blob = new Blob([data], { type: 'application/json' })
+            navigator.sendBeacon(`${API_BASE_URL}/timeline/generate`, blob)
+          }
+        }
+      }
+    }
+
+    // Listen for page unload
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    
+    // Cleanup
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload)
+    }
+  }, []) // 空依赖数组，只在组件挂载时设置一次
+
+  // Component unmount cleanup - use ref to access current values
+  const currentSelectedMemory = useRef(selectedMemory)
+  const currentMessages = useRef(messages)
+  const currentConversationAnalyzed = useRef(conversationAnalyzed)
+
+  useEffect(() => {
+    currentSelectedMemory.current = selectedMemory
+    currentMessages.current = messages
+    currentConversationAnalyzed.current = conversationAnalyzed
+  })
+
+  useEffect(() => {
+    return () => {
+      // On component unmount, trigger analysis if needed
+      if (currentSelectedMemory.current && 
+          currentMessages.current.length > 0 && 
+          !currentConversationAnalyzed.current) {
+        const userMessages = currentMessages.current.filter(msg => msg.sender === 'user')
+        if (userMessages.length > 0) {
+          generateTimelineAnalysis(currentSelectedMemory.current.id, currentMessages.current)
+        }
+      }
+    }
   }, [])
 
   const deleteMemory = async (memoryId: number) => {
@@ -204,6 +281,89 @@ const ChatWithPast = () => {
     setConversationDetail(null)
   }
 
+  // View timeline analysis for a memory
+  const viewTimeline = async (memoryId: number) => {
+    setShowTimelineDialog(memoryId)
+    setIsLoadingTimeline(true)
+    setTimelineData(null)
+
+    try {
+      const data = await timelineApi.getAnalysis(memoryId)
+      setTimelineData(data)
+    } catch (error) {
+      console.error('Failed to load timeline:', error)
+      setTimelineData(null)
+    } finally {
+      setIsLoadingTimeline(false)
+    }
+  }
+
+  const closeTimelineDialog = () => {
+    setShowTimelineDialog(null)
+    setTimelineData(null)
+  }
+
+  // Clean up duplicate timeline records
+  const cleanupTimelineRecords = async (memoryId: number) => {
+    try {
+      const result = await timelineApi.cleanup(memoryId)
+      console.log('Cleanup result:', result)
+      
+      // Refresh timeline data
+      if (showTimelineDialog) {
+        viewTimeline(memoryId)
+      }
+      
+      alert(`已清理 ${result.deleted} 条重复记录，保留 ${result.remaining} 条有效记录`)
+    } catch (error) {
+      console.error('Error cleaning up timeline:', error)
+      alert('清理失败，请重试')
+    }
+  }
+
+  // Generate timeline analysis after conversation ends
+  const generateTimelineAnalysis = async (memoryId: number, conversationMessages: Message[]) => {
+    try {
+      const result = await timelineApi.generate({
+        memoryRecordId: memoryId,
+        conversationData: conversationMessages
+      })
+      
+      console.log('Timeline analysis generated successfully:', result)
+    } catch (error) {
+      console.error('Error generating timeline analysis:', error)
+    }
+  }
+
+  // End conversation and trigger analysis
+  const endConversation = async () => {
+    if (!selectedMemory || conversationAnalyzed) {
+      // If no memory selected or already analyzed, just close
+      setSelectedMemory(null)
+      setMessages([])
+      setConversationAnalyzed(false)
+      return
+    }
+
+    // Check if there are actual user messages (meaningful conversation)
+    const userMessages = messages.filter(msg => msg.sender === 'user')
+    if (userMessages.length > 0) {
+      // Trigger timeline analysis for this conversation
+      try {
+        await generateTimelineAnalysis(selectedMemory.id, messages)
+        console.log('Conversation analysis completed')
+      } catch (error) {
+        console.error('Failed to generate timeline analysis:', error)
+      }
+    }
+    
+    // Mark as analyzed and clear the conversation
+    setConversationAnalyzed(true)
+    setSelectedMemory(null)
+    setMessages([])
+    setConversationAnalyzed(false)
+  }
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
@@ -267,6 +427,7 @@ const ChatWithPast = () => {
 
   const startConversation = (memory: PastMemory) => {
     setSelectedMemory(memory)
+    setConversationAnalyzed(false) // 重置分析状态
     
     // Format tags for display
     const tagsText = memory.tags && memory.tags.length > 0 
@@ -354,6 +515,20 @@ const ChatWithPast = () => {
                       
                       {/* Action buttons */}
                       <div className="absolute top-3 right-3 flex space-x-1">
+                        {/* Timeline button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            viewTimeline(memory.id)
+                          }}
+                          className="p-1.5 text-gray-400 hover:text-purple-500 opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-purple-50 rounded-lg"
+                          title="查看成长时间线"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </button>
+                        
                         {/* View history button - show for all memories for now */}
                         <button
                           onClick={(e) => {
@@ -364,7 +539,7 @@ const ChatWithPast = () => {
                           title="查看心理引导记录"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 616 0z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                           </svg>
                         </button>
@@ -396,16 +571,24 @@ const ChatWithPast = () => {
               {/* 对话标题 */}
               <div className="px-6 py-4 border-b border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-t-2xl">
                 {selectedMemory ? (
-                  <div className="flex items-center">
-                    <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full flex items-center justify-center mr-3">
-                      <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                      </svg>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-full flex items-center justify-center mr-3">
+                        <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                        </svg>
+                      </div>
+                      <div>
+                        <h3 className="font-semibold text-gray-800">{selectedMemory.title}</h3>
+                        <p className="text-sm text-blue-600 font-medium">{selectedMemory.date} 的你</p>
+                      </div>
                     </div>
-                    <div>
-                      <h3 className="font-semibold text-gray-800">{selectedMemory.title}</h3>
-                      <p className="text-sm text-blue-600 font-medium">{selectedMemory.date} 的你</p>
-                    </div>
+                    <button
+                      onClick={endConversation}
+                      className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 hover:bg-white rounded-lg transition-all duration-200 border border-gray-200 hover:border-gray-300 font-medium"
+                    >
+                      结束对话
+                    </button>
                   </div>
                 ) : (
                   <div className="flex items-center">
@@ -683,6 +866,159 @@ const ChatWithPast = () => {
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Timeline Analysis Dialog */}
+        {showTimelineDialog && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 backdrop-blur-sm">
+            <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] mx-4 shadow-2xl border border-gray-100 flex flex-col">
+              {/* Dialog Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <div className="flex items-center">
+                  <div className="w-10 h-10 bg-gradient-to-r from-purple-500 to-violet-500 rounded-xl flex items-center justify-center mr-4">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">心理成长时间线</h3>
+                    <p className="text-sm text-gray-500">
+                      追踪你的思想和情感变化轨迹
+                    </p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  {timelineData && timelineData.timeline && timelineData.timeline.length > 1 && (
+                    <button
+                      onClick={() => cleanupTimelineRecords(showTimelineDialog!)}
+                      className="px-3 py-2 text-sm text-orange-600 hover:text-orange-800 hover:bg-orange-50 rounded-lg transition-colors border border-orange-200 hover:border-orange-300"
+                      title="清理重复记录"
+                    >
+                      清理重复
+                    </button>
+                  )}
+                  <button
+                    onClick={closeTimelineDialog}
+                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              {/* Dialog Content */}
+              <div className="flex-1 overflow-hidden flex flex-col">
+                {isLoadingTimeline ? (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center">
+                      <div className="w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto mb-4"></div>
+                      <p className="text-gray-500">正在分析心理变化轨迹...</p>
+                    </div>
+                  </div>
+                ) : timelineData && timelineData.timeline ? (
+                  <div className="flex-1 overflow-y-auto p-6">
+                    <div className="max-w-4xl mx-auto">
+                      {/* Timeline */}
+                      <div className="relative">
+                        {/* Timeline line */}
+                        <div className="absolute left-8 top-0 bottom-0 w-0.5 bg-gradient-to-b from-purple-300 to-violet-300"></div>
+                        
+                        {/* Timeline items */}
+                        <div className="space-y-8">
+                          {timelineData.timeline.map((item: any, index: number) => (
+                            <div key={index} className="relative flex items-start group">
+                              {/* Timeline dot */}
+                              <div className={`w-4 h-4 rounded-full flex-shrink-0 z-10 ${
+                                index === 0 
+                                  ? 'bg-gradient-to-r from-purple-500 to-violet-500 ring-4 ring-purple-100'
+                                  : 'bg-gradient-to-r from-blue-400 to-indigo-400 ring-4 ring-blue-100'
+                              } transition-all duration-300 group-hover:scale-125`}></div>
+                              
+                              {/* Content card */}
+                              <div className="ml-6 flex-1">
+                                <div className="bg-white rounded-xl shadow-lg border border-gray-100 p-6 group-hover:shadow-xl transition-all duration-300">
+                                  <div className="flex items-center justify-between mb-3">
+                                    <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-medium ${
+                                      index === 0 
+                                        ? 'bg-purple-100 text-purple-800'
+                                        : 'bg-blue-100 text-blue-800'
+                                    }`}>
+                                      {item.stage}
+                                    </span>
+                                    <time className="text-xs text-gray-500">{item.date}</time>
+                                  </div>
+                                  
+                                  <h4 className="text-lg font-semibold text-gray-900 mb-2">{item.title}</h4>
+                                  <p className="text-gray-600 mb-4 leading-relaxed">{item.insight}</p>
+                                  
+                                  {item.emotionalState && (
+                                    <div className="mb-3">
+                                      <span className="text-sm font-medium text-gray-700">情绪状态: </span>
+                                      <span className="text-sm text-gray-600">{item.emotionalState}</span>
+                                    </div>
+                                  )}
+                                  
+                                  {item.growthIndicators && item.growthIndicators.length > 0 && (
+                                    <div className="flex flex-wrap gap-2">
+                                      {item.growthIndicators.map((indicator: string, idx: number) => (
+                                        <span
+                                          key={idx}
+                                          className="inline-flex items-center px-2.5 py-1 rounded-full text-xs bg-gray-100 text-gray-700"
+                                        >
+                                          {indicator}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center">
+                    <div className="text-center max-w-md">
+                      <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                        <svg className="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                      </div>
+                      <h4 className="text-lg font-semibold text-gray-700 mb-2">时间线待生成</h4>
+                      <p className="text-gray-500 mb-4">开始与过去的自己对话，我们将为你生成心理成长的时间线分析</p>
+                      <button
+                        onClick={closeTimelineDialog}
+                        className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                      >
+                        开始对话
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Dialog Footer */}
+              {timelineData && (
+                <div className="p-6 border-t border-gray-200 bg-gray-50 rounded-b-2xl">
+                  <div className="flex justify-between items-center">
+                    <div className="text-sm text-gray-500">
+                      基于 {timelineData.conversationsAnalyzed || 0} 次对话分析生成
+                    </div>
+                    <button
+                      onClick={closeTimelineDialog}
+                      className="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
+                    >
+                      关闭
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

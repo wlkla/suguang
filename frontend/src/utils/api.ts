@@ -140,3 +140,29 @@ export const analysisApi = {
     return response.data
   },
 }
+
+// 时间线分析相关API
+export const timelineApi = {
+  // 获取时间线分析
+  getAnalysis: async (memoryId: number) => {
+    const response = await api.get(`/timeline/analysis/${memoryId}`)
+    return response.data
+  },
+
+  // 生成时间线分析
+  generate: async (data: {
+    memoryRecordId: number
+    conversationId?: number
+    stage?: string
+    conversationData?: any[]
+  }) => {
+    const response = await api.post('/timeline/generate', data)
+    return response.data
+  },
+
+  // 清理重复记录
+  cleanup: async (memoryId: number) => {
+    const response = await api.delete(`/timeline/cleanup/${memoryId}`)
+    return response.data
+  },
+}
