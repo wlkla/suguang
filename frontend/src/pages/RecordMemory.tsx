@@ -8,13 +8,6 @@ interface Message {
   timestamp: Date
 }
 
-interface SavedConversation {
-  id: string
-  name: string
-  tags: string[]
-  messages: Message[]
-  date: string
-}
 
 const RecordMemory = () => {
   const [isConversationMode, setIsConversationMode] = useState(false)

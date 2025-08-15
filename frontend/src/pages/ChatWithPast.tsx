@@ -18,17 +18,6 @@ interface PastMemory {
   content?: string // Full content for AI context
 }
 
-interface SavedConversation {
-  id: string
-  name: string
-  tags: string[]
-  messages: {
-    role: 'user' | 'ai'
-    content: string
-    timestamp: Date
-  }[]
-  date: string
-}
 
 interface ChatHistory {
   id: number
@@ -68,7 +57,7 @@ const ChatWithPast = () => {
   const [isTyping, setIsTyping] = useState(false)
   const [pastMemories, setPastMemories] = useState<PastMemory[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<number | null>(null)
-  const [chatHistories, setChatHistories] = useState<ChatHistory[]>([])
+  const [, setChatHistories] = useState<ChatHistory[]>([])
   const [showHistoryDialog, setShowHistoryDialog] = useState<number | null>(null)
   const [conversationDetail, setConversationDetail] = useState<ConversationDetail | null>(null)
   const [isLoadingHistory, setIsLoadingHistory] = useState(false)
@@ -421,11 +410,11 @@ const ChatWithPast = () => {
       : '复杂的'
     
     // Start with time travel greeting
-    const initialMessages = [
+    const initialMessages: Message[] = [
       {
         id: '0',
         text: `嘿，这么多年过去了，你现在是什么样子了？我还是当时的我。那时候我记录了"${memory.title}"，我记得当时的心情是${tagsText}。`,
-        sender: 'past-self',
+        sender: 'past-self' as const,
         timestamp: new Date()
       }
     ]
@@ -780,16 +769,12 @@ const ChatWithPast = () => {
                             <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 ${
                               message.sender === 'user' 
                                 ? 'bg-gradient-to-r from-blue-500 to-indigo-500' 
-                                : message.sender === 'counselor'
-                                ? 'bg-gradient-to-r from-purple-500 to-violet-500'
                                 : 'bg-gradient-to-r from-gray-400 to-gray-500'
                             }`}>
                               <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                {message.sender === 'counselor' ? (
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                                ) : (
+                                {
                                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                                )}
+                                }
                               </svg>
                             </div>
                             
@@ -798,16 +783,9 @@ const ChatWithPast = () => {
                               className={`max-w-xs lg:max-w-md px-4 py-3 rounded-2xl shadow-sm ${
                                 message.sender === 'user'
                                   ? 'bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded-br-md'
-                                  : message.sender === 'counselor'
-                                  ? 'bg-gradient-to-r from-purple-50 to-violet-50 border border-purple-200 text-gray-900 rounded-bl-md'
                                   : 'bg-white border border-gray-200 text-gray-900 rounded-bl-md'
                               }`}
                             >
-                              {message.sender === 'counselor' && (
-                                <p className="text-xs mb-1 text-purple-600 font-medium">
-                                  AI心理引导师
-                                </p>
-                              )}
                               {message.sender === 'past-self' && (
                                 <p className="text-xs mb-1 text-blue-600">
                                   {conversationDetail?.memoryRecord.date} 的你
@@ -816,7 +794,7 @@ const ChatWithPast = () => {
                               <p className="leading-relaxed">{message.text}</p>
                               <p className={`text-xs mt-2 ${
                                 message.sender === 'user' ? 'text-blue-200' : 
-                                message.sender === 'counselor' ? 'text-purple-400' : 'text-gray-400'
+                                'text-gray-400'
                               }`}>
                                 {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                               </p>
